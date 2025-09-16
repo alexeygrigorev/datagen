@@ -33,10 +33,11 @@ def generate_dataset_plan(answers: WizardAnswers) -> DatasetPlan:
         # Add the computed row count to the plan
         rows = get_random_row_count(answers.size, answers.seed)
         # Create a new plan with the rows field added
-        plan_dict = plan.model_dump()
-        plan_dict['rows'] = rows
-        plan = DatasetPlan.model_validate(plan_dict)
-        
+        # plan_dict = plan.model_dump()
+        # plan_dict['rows'] = rows
+        # plan = DatasetPlan.model_validate(plan_dict)
+        plan.rows = rows
+
         logger.info("Successfully generated dataset plan with structured output")
         return plan
         

@@ -32,7 +32,7 @@ export OPENAI_API_KEY="your-api-key-here"
 ### Interactive Mode (Recommended)
 
 ```bash
-uv run python cli.py
+uv run python datagen.py
 ```
 
 This launches an interactive wizard that will guide you through:
@@ -47,21 +47,21 @@ The system automatically detects whether it's classification or regression from 
 
 ```bash
 # Simple example
-uv run python cli.py \
+uv run python datagen.py \
   --size medium \
   --description "customer churn prediction for telecom company" \
   --seed 42 \
   --accept
 
 # Another example  
-uv run python cli.py \
+uv run python datagen.py \
   --size small \
   --description "house prices based on location and features" \
   --task regression \
   --accept
 
 # Use existing plan
-uv run python cli.py \
+uv run python datagen.py \
   --plan out/house_prices_plan.json \
   --accept
 ```
@@ -73,7 +73,7 @@ All outputs are saved to the `out/` directory by default.
 ### 1. Customer Churn Prediction
 
 ```bash
-uv run python cli.py \
+uv run python datagen.py \
   --size medium \
   --description "customer churn prediction for telecom company" \
   --accept
@@ -88,7 +88,7 @@ uv run python cli.py \
 ### 2. Car Specifications Dataset
 
 ```bash
-uv run python cli.py \
+uv run python datagen.py \
   --task regression \
   --size small \
   --description "car fuel efficiency dataset" \
@@ -106,7 +106,7 @@ uv run python cli.py \
 
 ```bash
 # Interactive mode with custom description
-uv run python cli.py
+uv run python datagen.py
 # Enter: "smartphone specifications with price prediction"
 ```
 
@@ -169,7 +169,7 @@ The LLM automatically selects appropriate distributions and rounding:
 ## CLI Options
 
 ```bash
-uv run python cli.py [OPTIONS]
+uv run python datagen.py [OPTIONS]
 
 Options:
   --size [small|medium|large|very_large]  Dataset size preset
@@ -186,7 +186,7 @@ Options:
 
 ```bash
 # 1. Generate a smartphone dataset with smart rounding
-uv run python cli.py \
+uv run python datagen.py \
   --size medium \
   --description "smartphone specifications" \
   --accept
@@ -198,12 +198,12 @@ ls -la out/
 # smartphone_specifications_report.json (statistics)
 
 # 3. Generate custom dataset interactively
-uv run python cli.py
+uv run python datagen.py
 # Describe: "restaurant review sentiment analysis"
 # Confirm filename: "restaurant_review_sentiment" ✓
 
 # 4. Use existing plan
-uv run python cli.py \
+uv run python datagen.py \
   --plan out/smartphone_specifications_plan.json \
   --accept
 

@@ -3,3 +3,9 @@
 syntheticgen.log
 out/
 __pycache__/
+
+# Coverage files
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
