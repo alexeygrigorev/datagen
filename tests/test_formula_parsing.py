@@ -228,6 +228,32 @@ class TestFormulaParser:
         assert cat_terms[0].feature_name == "cat"
         assert cat_terms[0].value == "val"
 
+    def test_parse_categorical_coefficient_edge_cases(self):
+        """Test edge cases for categorical coefficient parsing."""
+        # Test missing coefficient (should default to 1.0)
+        formula = "[category==value]"
+        terms = self.parser.parse(formula)
+        
+        cat_terms = [t for t in terms if isinstance(t, CategoricalTerm)]
+        assert len(cat_terms) == 1
+        assert cat_terms[0].coefficient == 1.0
+        
+        # Test negative coefficient without explicit value (should be -1.0)
+        formula = "-[category==value]"
+        terms = self.parser.parse(formula)
+        
+        cat_terms = [t for t in terms if isinstance(t, CategoricalTerm)]
+        assert len(cat_terms) == 1
+        assert cat_terms[0].coefficient == -1.0
+        
+        # Test positive coefficient without explicit value (should be 1.0)
+        formula = "+[category==value]"
+        terms = self.parser.parse(formula)
+        
+        cat_terms = [t for t in terms if isinstance(t, CategoricalTerm)]
+        assert len(cat_terms) == 1
+        assert cat_terms[0].coefficient == 1.0
+
 
 class TestFormulaEvaluator:
     """Test the FormulaEvaluator class."""
@@ -328,3 +354,30 @@ class TestFormulaEvaluator:
         # Should return zeros since features don't exist
         expected = np.array([0.0, 0.0, 0.0])
         np.testing.assert_array_almost_equal(result, expected)
+    
+    def test_noise_generation_edge_cases(self):
+        """Test edge cases in noise term generation."""
+        # Test normal distribution with insufficient parameters (should use default)
+        term_insufficient = NoiseTerm(coefficient=1.0, distribution='normal', params=[5.0])  # Missing sigma
+        result = self.evaluator._generate_noise(term_insufficient, 10)
+        
+        assert len(result) == 10
+        # Should fallback to normal(0,1) since params are insufficient
+        
+        # Test uniform distribution with insufficient parameters
+        term_uniform_insufficient = NoiseTerm(coefficient=1.0, distribution='uniform', params=[2.0])  # Missing upper bound
+        result = self.evaluator._generate_noise(term_uniform_insufficient, 10)
+        
+        assert len(result) == 10
+        # Should fallback to uniform(0,1)
+        
+        # Test unknown distribution (should fallback to normal)
+        term_unknown = NoiseTerm(coefficient=1.0, distribution='unknown_dist', params=[1, 2])
+        result = self.evaluator._generate_noise(term_unknown, 10)
+        
+        assert len(result) == 10
+        # Should fallback to normal(0,1)
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])
