@@ -1,0 +1,24 @@
+[project]
+name = "datagen"
+version = "0.1.0"
+description = "Synthetic ML Dataset Generator with LLM-assisted specification"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "jsonschema>=4.25.1",
+    "numpy>=2.3.3",
+    "openai>=1.107.2",
+    "pandas>=2.3.2",
+    "pydantic>=2.11.9",
+    "questionary>=2.1.1",
+    "scikit-learn>=1.7.2",
+    "scipy>=1.16.2",
+    "typer>=0.17.4",
+]
+
+[project.scripts]
+syntheticgen = "cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

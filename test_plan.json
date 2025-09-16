@@ -1,0 +1,42 @@
+{
+  "task": "regression",
+  "name": "Test Car Dataset",
+  "description": "A test dataset for car fuel efficiency prediction",
+  "dataset_name": "car_fuel_efficiency_test",
+  "features": [
+    {
+      "name": "engine_size",
+      "type": "numerical",
+      "distribution": "normal(2.0, 0.5)",
+      "domain_semantics": "Engine displacement in liters",
+      "categories": null,
+      "missing_rate": 0.0,
+      "rounding_precision": "0.1"
+    },
+    {
+      "name": "weight",
+      "type": "numerical",
+      "distribution": "normal(3000, 500)",
+      "domain_semantics": "Vehicle weight in pounds",
+      "categories": null,
+      "missing_rate": 0.05,
+      "rounding_precision": "nearest_10"
+    },
+    {
+      "name": "fuel_type",
+      "type": "categorical",
+      "distribution": "bernoulli(0.8)",
+      "domain_semantics": "Type of fuel used",
+      "categories": [
+        "gasoline",
+        "diesel"
+      ],
+      "missing_rate": 0.0,
+      "rounding_precision": null
+    }
+  ],
+  "target_name": "mpg",
+  "target_formula": "25 + 2*engine_size - 0.01*weight + normal(0,2)",
+  "domain": "generic",
+  "seed": 42
+}
