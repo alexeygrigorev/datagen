@@ -1,6 +1,6 @@
 import logging
 from openai import OpenAI
-from schemas import DatasetPlan, WizardAnswers, get_random_row_count
+from .schemas import DatasetPlan, WizardAnswers, get_random_row_count
 
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,14 @@ def generate_dataset_plan(answers: WizardAnswers) -> DatasetPlan:
         )
         
         plan = response.output[0].content[0].parsed
+        
+        # Add the computed row count to the plan
+        rows = get_random_row_count(answers.size, answers.seed)
+        # Create a new plan with the rows field added
+        plan_dict = plan.model_dump()
+        plan_dict['rows'] = rows
+        plan = DatasetPlan.model_validate(plan_dict)
+        
         logger.info("Successfully generated dataset plan with structured output")
         return plan
         
@@ -54,12 +62,35 @@ Based on the description "{description}", create an appropriate number of featur
 Use snake_case for feature names.
 Include a target_name field with an appropriate name for the target variable.
 Create a dataset_name field with a file-safe name (lowercase, underscores instead of spaces, no special characters).
-For target_formula, create a formula that combines features meaningfully.
-Some features should have missing_rate > 0 (typically 0.05-0.15 for a few features) to make the dataset realistic.
+
+TARGET FORMULA SYNTAX:
+The target_formula field should be a mathematical expression combining features. Supported syntax:
+- Linear terms: "2.5*feature_name" or just "feature_name" (coefficient defaults to 1)
+- Categorical terms: "[category_feature==value]" (1 if match, 0 otherwise)
+- Constants: numerical values like "10" or "-2.5"
+- Noise terms: "normal(mean,std)", "uniform(min,max)", "poisson(lambda)"
+- Operators: +, -, * (multiplication must be explicit for coefficients)
 
 Examples:
-- Classification: "-2.0 + 0.5*age - 0.1*income + 0.3*risk_score"
-- Regression: "50000 + 100*experience + 5000*education_level + normal(0,5000)"
+- "1.5*age - 0.2*income + 2.0*[department==engineering] + normal(0,0.5)"
+- "-1.0 + 0.3*score + 1.5*[status==premium] - 0.8*[risk_level==high]"
+
+CLASSIFICATION TARGET FORMULA:
+For classification tasks, the formula output determines the binary class:
+- Formula output < 0 → Class 0 (negative class)
+- Formula output ≥ 0 → Class 1 (positive class)
+Design the formula to produce roughly balanced classes (30-70% positive).
+Include both continuous features and categorical indicators for realistic patterns.
+
+REGRESSION TARGET FORMULA:
+For regression tasks, the formula output is the direct target value.
+Include noise terms to add realistic variability.
+
+Formula Examples:
+- Classification: "-2.0 + 0.5*age - 0.1*income + 0.3*risk_score + 1.2*[premium_customer==yes]"
+- Regression: "50000 + 100*experience + 5000*education_level + 2000*[department==engineering] + normal(0,5000)"
+
+Some features should have missing_rate > 0 (typically 0.05-0.15 for a few features) to make the dataset realistic.
 
 DISTRIBUTION EXAMPLES:
 - normal(mu, sigma): Gaussian
@@ -97,6 +128,9 @@ def generate_fallback_plan(answers: WizardAnswers) -> DatasetPlan:
     
     # Use 8 features as default fallback
     num_features = 8
+    
+    # Get the row count that would be used
+    rows = get_random_row_count(answers.size, answers.seed)
 
     if answers.task == "classification":
         target_formula = "-1.0 + " + " + ".join([f"0.5*feature_{i+1}" for i in range(min(3, num_features))])
@@ -130,5 +164,6 @@ def generate_fallback_plan(answers: WizardAnswers) -> DatasetPlan:
         target_name="target",
         target_formula=target_formula,
         domain=answers.domain,
-        seed=answers.seed
+        seed=answers.seed,
+        rows=rows
     )

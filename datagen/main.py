@@ -8,7 +8,7 @@ import pandas as pd
 import questionary
 import typer
 
-from schemas import WizardAnswers, get_random_row_count
+from .schemas import WizardAnswers, get_random_row_count
 
 
 
@@ -123,7 +123,7 @@ def main(
             with open(plan, 'r') as f:
                 plan_data = json.load(f)
             
-            from schemas import DatasetPlan
+            from .schemas import DatasetPlan
             dataset_plan = DatasetPlan.model_validate(plan_data)
             
             # Create minimal answers for generation
@@ -160,21 +160,26 @@ def main(
             
             logger.info(f"Wizard answers: {answers}")
             
-            # Get randomized row count from size preset
-            rows = get_random_row_count(answers.size, answers.seed)
-            
-            # Show summary
-            typer.echo(f"\n📋 Dataset Summary:")
+            # Use rows from plan if available, otherwise compute from size preset
+            if plan and dataset_plan.rows is not None:
+                rows = dataset_plan.rows
+                typer.echo(f"\n📋 Dataset Summary (from saved plan):")
+            else:
+                # Get randomized row count from size preset
+                rows = get_random_row_count(answers.size, answers.seed)
+                typer.echo(f"\n📋 Dataset Summary:")
+                
             typer.echo(f"   Task: {answers.task}")
             typer.echo(f"   Size: {answers.size} ({rows:,} rows)")
             typer.echo(f"   Description: {answers.custom_description}")
             typer.echo(f"   Seed: {answers.seed}")
             
-            # Generate LLM plan
-            typer.echo("\n🤖 Generating dataset specification...")
-            from llm_generator import generate_dataset_plan
-            
-            dataset_plan = generate_dataset_plan(answers)
+            if not plan:
+                # Generate LLM plan
+                typer.echo("\n🤖 Generating dataset specification...")
+                from .llm_generator import generate_dataset_plan
+                
+                dataset_plan = generate_dataset_plan(answers)
         
         # Show plan to user (more readable)
         if not plan:  # Only show detailed plan for new generations
@@ -240,7 +245,7 @@ def main(
         
         # Generate dataset
         typer.echo("🎯 Generating synthetic dataset...")
-        from generator import generate_dataset
+        from .generator import generate_dataset
         
         answers_dict = answers.model_dump()
         dataset_file, report_file = generate_dataset(str(plan_file), answers_dict, outdir)

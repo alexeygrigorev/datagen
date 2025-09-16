@@ -7,11 +7,11 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
-from scipy.special import expit
 
-from schemas import (
+from .schemas import (
     DatasetPlan, get_random_row_count
 )
+from .formula_parsing import FormulaParser, FormulaEvaluator
 
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,8 @@ class DatasetGenerator:
         self.rows = rows
         self.answers = answers_dict
         self.rng = np.random.RandomState(plan.seed)
+        self.formula_parser = FormulaParser()
+        self.formula_evaluator = FormulaEvaluator(self.rng)
         
     def generate(self) -> Tuple[pd.DataFrame, Dict]:
         """Generate synthetic dataset and return DataFrame + report."""
@@ -185,20 +187,18 @@ class DatasetGenerator:
         return df
     
     def _generate_classification_target(self, df: pd.DataFrame) -> np.ndarray:
-        """Generate classification target using logit formula."""
+        """Generate classification target using formula thresholding."""
         try:
-            logit_formula = self.plan.target_formula
-            logger.info(f"Using logit formula: {logit_formula}")
+            formula = self.plan.target_formula
+            logger.info(f"Using classification formula: {formula}")
             
-            # Simple evaluation of the logit formula
-            logits = self._evaluate_formula(logit_formula, df)
-            probs = expit(logits)  # sigmoid function
+            # Evaluate the formula directly
+            formula_output = self._evaluate_formula(formula, df)
             
-            # Apply class imbalance adjustment
-            probs = self._adjust_class_balance(probs, "slight")
+            # Simple thresholding: negative -> 0, positive -> 1
+            targets = (formula_output >= 0).astype(int)
             
-            # Generate binary targets
-            targets = self.rng.binomial(1, probs, len(probs))
+            logger.info(f"Generated {targets.sum()}/{len(targets)} positive class samples ({targets.mean():.2%})")
             return targets
             
         except Exception as e:
@@ -239,47 +239,20 @@ class DatasetGenerator:
                 return self.rng.normal(100, 20, len(df))
     
     def _evaluate_formula(self, formula: str, df: pd.DataFrame) -> np.ndarray:
-        """Evaluate mathematical formula with feature values."""
-        # Simple implementation - replace feature names with actual values
-        # This is a basic version, could be much more sophisticated
-        
-        result = np.zeros(len(df))
-        
-        # Handle simple linear terms like "0.5*feature_name"
-        for feature in self.plan.features:
-            if feature.name in formula and feature.type == "numerical":
-                # Extract coefficient for this feature
-                pattern = r'([+-]?\s*\d*\.?\d*)\s*\*\s*' + re.escape(feature.name)
-                matches = re.findall(pattern, formula)
-                for match in matches:
-                    coef = float(match.replace(' ', '') or '1')
-                    result += coef * df[feature.name].values
-        
-        # Handle categorical indicators like "[feature==value]"
-        categorical_pattern = r'\[([^=]+)==([^\]]+)\]'
-        for match in re.finditer(categorical_pattern, formula):
-            feature_name = match.group(1).strip()
-            value = match.group(2).strip()
+        """Evaluate mathematical formula with feature values using new parser."""
+        try:
+            # Parse the formula into structured terms
+            terms = self.formula_parser.parse(formula)
             
-            if feature_name in df.columns:
-                indicator = (df[feature_name] == value).astype(int)
-                
-                # Find coefficient before this indicator
-                start_pos = max(0, match.start() - 10)
-                before_text = formula[start_pos:match.start()]
-                coef_match = re.search(r'([+-]?\s*\d*\.?\d*)$', before_text)
-                coef = float(coef_match.group(1).replace(' ', '') or '1') if coef_match else 1.0
-                
-                result += coef * indicator
-        
-        # Handle constant terms
-        constant_matches = re.findall(r'^([+-]?\d+\.?\d*)|(?<=[+-])\s*(\d+\.?\d*)(?!\s*\*)', formula)
-        for match in constant_matches:
-            constant = match[0] or match[1]
-            if constant:
-                result += float(constant)
-        
-        return result
+            # Evaluate the parsed terms against the dataframe
+            result = self.formula_evaluator.evaluate(terms, df)
+            
+            return result
+            
+        except Exception as e:
+            logger.warning(f"Formula evaluation failed: {e}, using fallback")
+            # Fallback to zeros if parsing fails
+            return np.zeros(len(df))
     
     def _adjust_class_balance(self, probs: np.ndarray, class_prior: str) -> np.ndarray:
         """Adjust probabilities to achieve desired class balance."""
@@ -521,9 +494,13 @@ def generate_dataset(plan_file: str, answers: dict, output_dir: str = ".") -> Tu
     
     plan = DatasetPlan.model_validate(plan_data)
     
-    # Get randomized row count from size preset
-    size_preset = answers['size']
-    rows = get_random_row_count(size_preset, answers['seed'])
+    # Use rows from plan if available, otherwise compute from size preset
+    if plan.rows is not None:
+        rows = plan.rows
+    else:
+        # Fallback for old plans without rows field
+        size_preset = answers['size']
+        rows = get_random_row_count(size_preset, answers['seed'])
     
     # Generate dataset
     generator = DatasetGenerator(plan, rows, answers)

@@ -5,10 +5,10 @@ Synthetic ML Dataset Generator Entry Point
 
 Usage:
     python datagen.py
-    python datagen.py --task classification --size medium --features 15 --domain ecommerce --accept
+    python datagen.py --task classification --size medium --accept
 """
 
-from cli import app
+from datagen.main import app
 
 if __name__ == "__main__":
     app()

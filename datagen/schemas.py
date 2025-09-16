@@ -29,6 +29,7 @@ class DatasetPlan(BaseModel):
     target_formula: str
     domain: Domain
     seed: int
+    rows: Optional[int] = None  # Number of rows to generate (computed if None)
 
 
 class WizardAnswers(BaseModel):
