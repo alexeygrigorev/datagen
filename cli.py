@@ -228,7 +228,9 @@ def main(
             outdir_path = Path(outdir)
             outdir_path.mkdir(exist_ok=True)
             
-            plan_file = outdir_path / "dataset_plan.json"
+            # Use dataset name for plan file
+            plan_filename = f"{getattr(dataset_plan, 'dataset_name', 'dataset')}_plan.json"
+            plan_file = outdir_path / plan_filename
             with open(plan_file, 'w') as f:
                 json.dump(dataset_plan.model_dump(), f, indent=2)
             

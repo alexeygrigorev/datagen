@@ -28,7 +28,8 @@ def test_generation():
     
     # Save plan to out directory
     Path("out").mkdir(exist_ok=True)
-    plan_file = "out/dataset_plan.json"
+    plan_filename = f"{getattr(plan, 'dataset_name', 'dataset')}_plan.json"
+    plan_file = f"out/{plan_filename}"
     with open(plan_file, 'w') as f:
         json.dump(plan.model_dump(), f, indent=2)
     

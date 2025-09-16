@@ -6,7 +6,10 @@ A command-line tool that uses LLM-assisted specification to generate synthetic d
 
 - 🤖 **LLM-Powered**: Uses OpenAI's structured output to generate realistic dataset specifications
 - 🎯 **Interactive Wizard**: Guided setup for dataset requirements
-- 📊 **Multiple Domains**: Finance, healthcare, e-commerce, marketing, IoT, HR, or generic
+- 📊 **Smart Rounding**: Intelligent precision based on feature semantics (integers for counts, decimals for measurements)
+- 🏷️ **Custom Names**: LLM generates meaningful dataset names, user-confirmable
+- 📂 **Organized Output**: Consistent naming across dataset, plan, and report files
+- 🎲 **Missing Values**: Realistic missing data patterns per feature
 - ⚡ **Fast Generation**: Efficient synthetic data creation with numpy/pandas
 - 🔧 **CLI Ready**: Both interactive and non-interactive modes
 
@@ -17,8 +20,10 @@ A command-line tool that uses LLM-assisted specification to generate synthetic d
 git clone <repo-url>
 cd datagen
 
+# Install dependencies with uv
 uv sync
 
+# Set OpenAI API key
 export OPENAI_API_KEY="your-api-key-here"
 ```
 
@@ -27,13 +32,14 @@ export OPENAI_API_KEY="your-api-key-here"
 ### Interactive Mode (Recommended)
 
 ```bash
-uv run python datagen.py
+uv run python cli.py
 ```
 
 This launches an interactive wizard that will guide you through:
 1. Dataset size (small/medium/large/very_large) 
 2. Dataset description (free text like "customer churn prediction", "car fuel efficiency")
-3. Random seed (optional)
+3. Dataset filename confirmation (auto-generated from description)
+4. Plan approval with complete feature list
 
 The system automatically detects whether it's classification or regression from your description and lets the LLM determine the optimal number of features.
 
@@ -41,22 +47,22 @@ The system automatically detects whether it's classification or regression from 
 
 ```bash
 # Simple example
-python syntheticgen.py \
+uv run python cli.py \
   --size medium \
   --description "customer churn prediction for telecom company" \
   --seed 42 \
   --accept
 
 # Another example  
-python syntheticgen.py \
+uv run python cli.py \
   --size small \
   --description "house prices based on location and features" \
   --task regression \
   --accept
 
 # Use existing plan
-python syntheticgen.py \
-  --plan out/dataset_plan.json \
+uv run python cli.py \
+  --plan out/house_prices_plan.json \
   --accept
 ```
 
@@ -67,88 +73,103 @@ All outputs are saved to the `out/` directory by default.
 ### 1. Customer Churn Prediction
 
 ```bash
-python syntheticgen.py --size medium --description "customer churn prediction for telecom company" --accept
+uv run python cli.py \
+  --size medium \
+  --description "customer churn prediction for telecom company" \
+  --accept
 ```
 
 **Generated Output:**
 - ~10,000 rows with features like customer_tenure, monthly_charges, contract_type, etc.
 - Binary classification target for churn prediction  
 - Realistic telecom industry feature relationships
+- Files: `customer_churn_prediction.csv`, `customer_churn_prediction_report.json`, `customer_churn_prediction_plan.json`
 
-### 2. Financial Risk Prediction (Regression)
+### 2. Car Specifications Dataset
 
 ```bash
-python datagen.py \
+uv run python cli.py \
   --task regression \
-  --size large \
-  --features 20 \
-  --domain finance \
+  --size small \
+  --description "car fuel efficiency dataset" \
   --seed 123 \
   --accept
 ```
 
 **Generated Output:**
-- 100,000 rows with financial features (income, credit_score, debt_ratio, etc.)
-- Target variable representing risk score or loan amount
-- Realistic feature relationships and distributions
+- 1,000+ rows with features like engine_size (1 decimal), weight (nearest 10), cylinders (integer)
+- Target variable: mpg (fuel efficiency)
+- Smart rounding: engine_size=2.1, weight=2950, cylinders=6 (no .0 suffix)
+- Files: `car_fuel_efficiency_dataset.csv`, etc.
 
-### 4. Custom Dataset Description
+### 3. Smartphone Specifications
 
 ```bash
 # Interactive mode with custom description
-python datagen.py
-# Then select "Custom (describe your own)" and enter:
-# "dataset about electric vehicle charging station usage patterns"
+uv run python cli.py
+# Enter: "smartphone specifications with price prediction"
 ```
 
 **Generated Output:**
-- Features like station_location, charging_duration, battery_capacity, time_of_day
-- Domain-specific value ranges and realistic correlations
-- Tailored feature relationships for EV charging context
+- Features like screen_size (0.1 precision), ram_gb (integer), battery_mah (nearest 100)
+- Target: price with realistic correlations
+- Intelligent rounding based on real-world measurement precision
+
+## Smart Rounding System
+
+The LLM automatically assigns appropriate rounding precision based on feature semantics:
+
+| Precision | Example Features | Output Format |
+|-----------|------------------|---------------|
+| `"integer"` | cylinders, gears, passengers | `4, 6, 8` (Int64 type) |
+| `"1"` | horsepower, age, year | `150, 225, 180` (Int64 type) |
+| `"0.1"` | fuel_efficiency, GPA, ratings | `24.5, 3.7, 4.2` |
+| `"0.01"` | prices, percentages | `29.99, 15.75, 82.50` |
+| `"nearest_10"` | weight, engine_displacement | `2950, 3180, 2640` (Int64) |
+| `"nearest_100"` | battery_capacity, large_measurements | `3200, 4500, 3800` (Int64) |
 
 ## Size Presets
 
-| Preset | Base Rows | Variance | Actual Range | Default Features | Use Case |
-|--------|-----------|----------|--------------|------------------|----------|
-| `small` | 1,000 | ±200 | 800-1,200 | 8 | Quick prototyping, testing |
-| `medium` | 10,000 | ±2,000 | 8,000-12,000 | 20 | Development, experiments |
-| `large` | 100,000 | ±20,000 | 80,000-120,000 | 40 | Training larger models |
-| `very_large` | 1,000,000 | ±200,000 | 800,000-1,200,000 | 60 | Production-scale testing |
+| Preset | Base Rows | Variance | Actual Range | Use Case |
+|--------|-----------|----------|--------------|----------|
+| `small` | 1,000 | ±200 | 800-1,200 | Quick prototyping, testing |
+| `medium` | 10,000 | ±2,000 | 8,000-12,000 | Development, experiments |
+| `large` | 100,000 | ±20,000 | 80,000-120,000 | Training larger models |
+| `very_large` | 1,000,000 | ±200,000 | 800,000-1,200,000 | Production-scale testing |
 
 > **Note**: Row counts are randomized within the variance range using the provided seed for reproducibility.
 
-## Supported Domains
+## Dataset Naming
 
-- **finance**: Credit scores, transaction amounts, risk indicators
-- **healthcare**: Patient metrics, treatment history, readmission risk  
-- **ecommerce**: Customer behavior, purchase patterns, churn prediction
-- **marketing**: Campaign metrics, conversion rates, engagement scores
-- **iot**: Sensor data, device status, failure prediction
-- **hr**: Employee metrics, performance, attrition risk
-- **generic**: General-purpose features for any ML task
-- **custom**: Describe your own dataset requirements (e.g., "car fuel efficiency", "social media engagement")
+- **Auto-Generated**: LLM creates file-safe names like `customer_churn_prediction`, `car_fuel_efficiency`
+- **User Confirmation**: Interactive prompt to modify proposed name
+- **Consistent Files**: All related files use the same base name:
+  - `{dataset_name}.csv` (dataset)
+  - `{dataset_name}_report.json` (statistics)  
+  - `{dataset_name}_plan.json` (specification)
 
 ## Output Files
 
 Each generation creates:
 
-1. **`dataset.csv`** - The synthetic dataset ready for ML
-2. **`dataset_plan.json`** - Complete specification used by LLM
-3. **`dataset_report.json`** - Statistics and data quality metrics
-4. **`datagen.log`** - Detailed logs of the generation process
+1. **`{dataset_name}.csv`** - The synthetic dataset ready for ML (with proper integer types in memory)
+2. **`{dataset_name}_plan.json`** - Complete specification used by LLM including rounding rules
+3. **`{dataset_name}_report.json`** - Statistics and data quality metrics
+4. **`syntheticgen.log`** - Detailed logs of the generation process
 
 ## Feature Types & Distributions
 
-The LLM automatically selects appropriate distributions:
+The LLM automatically selects appropriate distributions and rounding:
 
-- **Numerical**: `normal(μ,σ)`, `uniform(a,b)`, `lognormal(μ,σ)`, `poisson(λ)`
+- **Numerical**: `normal(μ,σ)`, `uniform(a,b)`, `lognormal(μ,σ)`, `poisson(λ)` with smart rounding
 - **Categorical**: Custom categories with specified probabilities
 - **Binary**: `bernoulli(p)` for 0/1 features
+- **Missing Values**: Per-feature missing_rate (0.0 to 0.3) for realistic data quality
 
 ## CLI Options
 
 ```bash
-python syntheticgen.py [OPTIONS]
+uv run python cli.py [OPTIONS]
 
 Options:
   --size [small|medium|large|very_large]  Dataset size preset
@@ -164,24 +185,39 @@ Options:
 ## Example Workflow
 
 ```bash
-# 1. Generate a medium e-commerce dataset
-python datagen.py --task classification --size medium --features 15 --domain ecommerce --seed 42 --accept
+# 1. Generate a smartphone dataset with smart rounding
+uv run python cli.py \
+  --size medium \
+  --description "smartphone specifications" \
+  --accept
 
-# 2. Check the output
-ls -la
-# dataset.csv (8K-12K rows, 16 columns including target)
-# dataset_plan.json (LLM specification)
-# dataset_report.json (statistics)
+# 2. Check the output (example: smartphone_specifications.csv)
+ls -la out/
+# smartphone_specifications.csv (10K rows with proper types)
+# smartphone_specifications_plan.json (LLM specification with rounding rules)
+# smartphone_specifications_report.json (statistics)
 
 # 3. Generate custom dataset interactively
-python datagen.py
-# Select "Custom" domain and describe: "restaurant review sentiment analysis"
+uv run python cli.py
+# Describe: "restaurant review sentiment analysis"
+# Confirm filename: "restaurant_review_sentiment" ✓
 
-# 4. Load in Python for ML
+# 4. Use existing plan
+uv run python cli.py \
+  --plan out/smartphone_specifications_plan.json \
+  --accept
+
+# 5. Load in Python for ML
 import pandas as pd
-df = pd.read_csv('dataset.csv')
-X = df.drop('target', axis=1)
-y = df['target']
+df = pd.read_csv('out/smartphone_specifications.csv')
+
+# Notice proper data types and realistic values:
+# ram_gb: 4, 6, 8, 12 (integers, no .0)
+# screen_size: 5.5, 6.1, 6.7 (1 decimal)
+# price: 299.99, 599.00, 899.50 (2 decimals)
+
+X = df.drop('price', axis=1)  # or whatever the target name is
+y = df['price']
 
 # Ready for sklearn, etc.
 from sklearn.model_selection import train_test_split

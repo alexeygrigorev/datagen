@@ -2,3 +2,4 @@
 .venv
 syntheticgen.log
 out/
+__pycache__/
