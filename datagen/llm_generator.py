@@ -1,21 +1,25 @@
 import logging
-from openai import OpenAI
 from .schemas import DatasetPlan, WizardAnswers, get_random_row_count
+from .providers import Provider, create_client, get_model_for_provider
 
 
 logger = logging.getLogger(__name__)
 
 
-def generate_dataset_plan(answers: WizardAnswers) -> DatasetPlan:
-    """Generate dataset plan using OpenAI structured output."""
+def generate_dataset_plan(answers: WizardAnswers, provider: Provider = Provider.OPENAI) -> DatasetPlan:
+    """Generate dataset plan using LLM structured output."""
     
-    client = OpenAI()
+    client = create_client(provider)
+    model = get_model_for_provider(provider)
     prompt = build_prompt(answers)
     
+    logger.info(f"Generating plan using {provider.value} (model: {model})")
+    
     try:
-        response = client.responses.parse(
-            model='gpt-4o',
-            input=[
+        plan = client.chat.completions.create(
+            model=model,
+            response_model=DatasetPlan,
+            messages=[
                 {
                     "role": "system", 
                     "content": "You are a synthetic dataset specification generator. Generate detailed, realistic dataset plans."
@@ -25,17 +29,10 @@ def generate_dataset_plan(answers: WizardAnswers) -> DatasetPlan:
                     "content": prompt
                 }
             ],
-            text_format=DatasetPlan
         )
-        
-        plan = response.output[0].content[0].parsed
         
         # Add the computed row count to the plan
         rows = get_random_row_count(answers.size, answers.seed)
-        # Create a new plan with the rows field added
-        # plan_dict = plan.model_dump()
-        # plan_dict['rows'] = rows
-        # plan = DatasetPlan.model_validate(plan_dict)
         plan.rows = rows
 
         logger.info("Successfully generated dataset plan with structured output")

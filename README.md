@@ -23,9 +23,20 @@ cd datagen
 # Install dependencies with uv
 uv sync
 
-# Set OpenAI API key
-export OPENAI_API_KEY="your-api-key-here"
+# Setup environment variables
+cp .env.example .env
+# Edit .env to add your API keys (OPENAI_API_KEY or GROQ_API_KEY)
 ```
+
+## Configuration & Providers
+
+The tool supports multiple LLM providers for generating dataset specifications:
+
+1.  **OpenAI** (Default): Uses `gpt-4o`. Requires `OPENAI_API_KEY`.
+2.  **Groq** (Fast/Free): Uses `llama-3.3-70b`. Requires `GROQ_API_KEY`.
+3.  **Fallback**: If no keys are found, a basic deterministic generator is used (no LLM).
+
+You can configure these in your `.env` file or via environment variables.
 
 ## Quick Start
 
@@ -36,17 +47,25 @@ uv run python datagen.py
 ```
 
 This launches an interactive wizard that will guide you through:
-1. Dataset size (small/medium/large/very_large) 
-2. Dataset description (free text like "customer churn prediction", "car fuel efficiency")
-3. Dataset filename confirmation (auto-generated from description)
-4. Plan approval with complete feature list
+1. **Provider Selection**: If multiple API keys are found (e.g., both OpenAI and Groq), you'll be asked which to use.
+2. Dataset size (small/medium/large/very_large) 
+3. Dataset description (free text like "customer churn prediction", "car fuel efficiency")
+4. Dataset filename confirmation (auto-generated from description)
+5. Plan approval with complete feature list
 
 The system automatically detects whether it's classification or regression from your description and lets the LLM determine the optimal number of features.
 
 ### Non-Interactive Mode
 
 ```bash
-# Simple example
+# Use Groq specifically
+uv run python datagen.py \
+  --provider groq \
+  --size medium \
+  --description "customer churn prediction" \
+  --accept
+
+# Simple example (uses default or available provider)
 uv run python datagen.py \
   --size medium \
   --description "customer churn prediction for telecom company" \
@@ -172,6 +191,7 @@ The LLM automatically selects appropriate distributions and rounding:
 uv run python datagen.py [OPTIONS]
 
 Options:
+  --provider [openai|groq]                AI Provider to use
   --size [small|medium|large|very_large]  Dataset size preset
   --description TEXT                      Dataset description (free text)
   --task [classification|regression]      Task type (auto-detected if omitted)

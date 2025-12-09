@@ -7,10 +7,12 @@ from typing import Optional
 import pandas as pd
 import questionary
 import typer
+from dotenv import load_dotenv
 
 from .schemas import WizardAnswers, get_random_row_count
+from .providers import Provider, get_available_providers
 
-
+load_dotenv()
 
 app = typer.Typer(help="Synthetic ML Dataset Generator")
 logger = logging.getLogger(__name__)
@@ -18,7 +20,9 @@ logger = logging.getLogger(__name__)
 
 def setup_logging(outdir: str, level: str = "WARNING"):
     """Setup logging to file and console."""
-    log_file = Path(outdir) / "syntheticgen.log"
+    outdir_path = Path(outdir)
+    outdir_path.mkdir(parents=True, exist_ok=True)
+    log_file = outdir_path / "syntheticgen.log"
     
     # File handler with INFO level for debugging
     file_handler = logging.FileHandler(log_file)
@@ -43,6 +47,40 @@ def setup_logging(outdir: str, level: str = "WARNING"):
     logging.getLogger("openai").setLevel(logging.WARNING)
     
     return logging.getLogger(__name__)
+
+
+def resolve_provider(cli_provider: Optional[str]) -> Optional[Provider]:
+    """
+    Determine which provider to use.
+    Order of precedence:
+    1. CLI argument (--provider)
+    2. Interactive selection (if multiple keys found)
+    3. Auto-detect (if only one key found)
+    4. None (triggers fallback mode)
+    """
+    available = get_available_providers()
+    
+    # 1. CLI argument
+    if cli_provider:
+        try:
+            return Provider(cli_provider.lower())
+        except ValueError:
+            typer.echo(f"Warning: Provider '{cli_provider}' not supported or configured. Available: {[p.value for p in available]}")
+            # Fall through to auto-detect
+            
+    # If no keys found, return None (will use fallback)
+    if not available:
+        return None
+        
+    # 3. Auto-detect (single provider)
+    if len(available) == 1:
+        return available[0]
+        
+    # 2. Interactive selection (multiple providers)
+    return questionary.select(
+        "Select AI Provider:",
+        choices=[p.value for p in available]
+    ).ask()
 
 
 def wizard_interview() -> WizardAnswers:
@@ -105,6 +143,7 @@ def main(
     task: Optional[str] = typer.Option(None, help="Task type: classification or regression"),
     seed: Optional[int] = typer.Option(None, help="Random seed"),
     plan: Optional[str] = typer.Option(None, help="Path to existing dataset plan JSON file"),
+    provider: Optional[str] = typer.Option(None, help="AI Provider (openai, groq)"),
     accept: bool = typer.Option(False, help="Skip confirmation"),
     outdir: str = typer.Option("out", help="Output directory")
 ):
@@ -115,6 +154,8 @@ def main(
     logger.info("Starting synthetic dataset generation")
     
     try:
+        active_provider = resolve_provider(provider)
+        
         # Handle existing plan file
         if plan:
             typer.echo("🎯 Loading existing dataset plan...")
@@ -176,10 +217,14 @@ def main(
             
             if not plan:
                 # Generate LLM plan
-                typer.echo("\n🤖 Generating dataset specification...")
-                from .llm_generator import generate_dataset_plan
-                
-                dataset_plan = generate_dataset_plan(answers)
+                if active_provider:
+                    typer.echo(f"\nGenerating dataset specification using {active_provider.value}...")
+                    from .llm_generator import generate_dataset_plan
+                    dataset_plan = generate_dataset_plan(answers, provider=active_provider)
+                else:
+                    typer.echo("\nNo AI keys found. Using deterministic fallback generator.")
+                    from .llm_generator import generate_fallback_plan
+                    dataset_plan = generate_fallback_plan(answers)
         
         # Show plan to user (more readable)
         if not plan:  # Only show detailed plan for new generations
@@ -212,13 +257,14 @@ def main(
             
             # Confirm or regenerate
             if not accept:
+                choices = ["Accept and generate dataset"]
+                if active_provider:
+                    choices.append("Regenerate plan")
+                choices.append("Cancel")
+
                 action = questionary.select(
                     "What would you like to do?",
-                    choices=[
-                        "Accept and generate dataset",
-                        "Regenerate plan",
-                        "Cancel"
-                    ]
+                    choices=choices
                 ).ask()
                 
                 if action == "Cancel":
@@ -226,7 +272,8 @@ def main(
                     raise typer.Exit(0)
                 elif action == "Regenerate plan":
                     typer.echo("🔄 Regenerating...")
-                    dataset_plan = generate_dataset_plan(answers)
+                    from .llm_generator import generate_dataset_plan
+                    dataset_plan = generate_dataset_plan(answers, provider=active_provider)
         
         # Save plan (only for new plans, not existing ones)
         if not plan:
