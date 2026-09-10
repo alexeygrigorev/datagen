@@ -24,8 +24,8 @@ def generate_dataset_plan(answers: WizardAnswers) -> DatasetPlan:
 
     prompt = build_prompt(answers)
 
-    client = OpenAI()
     try:
+        client = OpenAI()
         response = client.responses.parse(
             model='gpt-4o',
             input=[

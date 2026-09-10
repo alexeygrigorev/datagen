@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 def setup_logging(outdir: str, level: str = "WARNING"):
     """Setup logging to file and console."""
+    Path(outdir).mkdir(parents=True, exist_ok=True)
     log_file = Path(outdir) / "syntheticgen.log"
     
     # File handler with INFO level for debugging
