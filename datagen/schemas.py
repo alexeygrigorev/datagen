@@ -4,7 +4,16 @@ from pydantic import BaseModel, Field
 
 # Type aliases using literals
 TaskType = Literal["classification", "regression"]
-Domain = Literal["finance", "healthcare", "ecommerce", "marketing", "iot", "hr", "generic"]
+Domain = Literal[
+    "finance",
+    "healthcare",
+    "ecommerce",
+    "marketing",
+    "automotive",
+    "iot",
+    "hr",
+    "generic",
+]
 SizePreset = Literal["small", "medium", "large", "very_large"]
 
 
@@ -44,6 +53,13 @@ NoiseDistribution = Annotated[
 ]
 
 
+class FeatureBounds(BaseModel):
+    """Optional physical or business bounds for a generated numeric value."""
+
+    low: Optional[float] = None
+    high: Optional[float] = None
+
+
 # ---------- Features (discriminated by type) ----------
 
 class NumericalFeature(BaseModel):
@@ -53,6 +69,7 @@ class NumericalFeature(BaseModel):
     domain_semantics: str = ""
     missing_rate: float = 0.0
     rounding_precision: Optional[str] = None  # e.g. "integer", "1", "0.1", "0.01", "nearest_10"
+    bounds: Optional[FeatureBounds] = None
 
 
 class CategoricalFeature(BaseModel):
@@ -110,6 +127,50 @@ TargetTerm = Annotated[
 ]
 
 
+class DerivedNumericalFeature(BaseModel):
+    """A numeric feature generated from already-generated features.
+
+    Keeping this relationship in the plan makes the dependency structure explicit
+    and reproducible instead of asking an LLM to imply correlations in prose.
+    """
+
+    name: str
+    type: Literal["derived_numerical"] = "derived_numerical"
+    formula: List[TargetTerm]
+    domain_semantics: str = ""
+    missing_rate: float = 0.0
+    rounding_precision: Optional[str] = None
+    bounds: Optional[FeatureBounds] = None
+
+
+# Rebind the union after the target terms and derived feature are defined. The
+# DatasetPlan below sees this complete union; existing plans remain valid.
+Feature = Annotated[
+    Union[NumericalFeature, CategoricalFeature, BinaryFeature, DerivedNumericalFeature],
+    Field(discriminator="type"),
+]
+
+
+class MissingnessRule(BaseModel):
+    """Domain-aware missingness, optionally limited to matching rows."""
+
+    feature: str
+    rate: float
+    condition_feature: Optional[str] = None
+    condition_operator: Optional[Literal["eq", "ne", "lt", "le", "gt", "ge"]] = None
+    condition_value: Optional[Union[float, str]] = None
+
+
+class ClassificationConfig(BaseModel):
+    """How a classification score becomes an observed target."""
+
+    mode: Literal["threshold", "bernoulli_logistic"] = "threshold"
+    temperature: float = 1.0
+    target_rate: Optional[float] = None
+    probability_clip_low: float = 0.01
+    probability_clip_high: float = 0.99
+
+
 def format_target_formula(terms: List[TargetTerm]) -> str:
     """Human-readable rendering of structured target terms (for CLI display)."""
     parts = []
@@ -132,6 +193,7 @@ def format_target_formula(terms: List[TargetTerm]) -> str:
 
 
 class DatasetPlan(BaseModel):
+    plan_version: int = 2
     task: TaskType
     name: str
     description: str
@@ -142,6 +204,10 @@ class DatasetPlan(BaseModel):
     domain: Domain
     seed: int
     rows: Optional[int] = None  # Number of rows to generate (computed if None)
+    missingness_rules: List[MissingnessRule] = Field(default_factory=list)
+    classification: Optional[ClassificationConfig] = None
+    target_rounding_precision: Optional[str] = None
+    target_noise_scale: Optional[float] = None
 
 
 class WizardAnswers(BaseModel):

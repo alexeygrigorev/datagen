@@ -13,8 +13,11 @@ from .schemas import (
     CategoricalTerm,
     ConstantTerm,
     DatasetPlan,
+    DerivedNumericalFeature,
     Feature,
+    FeatureBounds,
     LinearTerm,
+    MissingnessRule,
     LogNormalDist,
     NoiseTerm,
     NormalDist,
@@ -44,13 +47,24 @@ class DatasetGenerator:
         logger.info(f"Generating {self.rows} rows with {len(self.plan.features)} features")
         start_time = time.time()
 
-        # Generate features
+        # Generate features in plan order. Derived features may depend on
+        # previously generated columns, which makes domain relationships
+        # explicit and deterministic.
         feature_data = {}
         for feature in self.plan.features:
             logger.info(f"Generating feature: {feature.name}")
-            feature_data[feature.name] = self._generate_feature(feature)
+            if isinstance(feature, DerivedNumericalFeature):
+                feature_data[feature.name] = self._generate_derived_feature(
+                    feature, pd.DataFrame(feature_data)
+                )
+            else:
+                feature_data[feature.name] = self._generate_feature(feature)
 
         df = pd.DataFrame(feature_data)
+
+        # Enforce physical/business bounds before rounding. This prevents
+        # impossible intermediate values from influencing the target.
+        df = self._apply_bounds(df)
 
         # Apply rounding to numerical features
         df = self._apply_rounding(df)
@@ -62,12 +76,17 @@ class DatasetGenerator:
             target = self._generate_regression_target(df)
 
         df[self.plan.target_name] = target
+        df = self._apply_target_rounding(df)
 
         # Apply missingness
         df = self._apply_missingness(df)
 
         # Apply outliers
         df = self._apply_outliers(df)
+
+        # The legacy global outlier option is still supported, but a bounded
+        # plan must never leave physically impossible values behind.
+        df = self._apply_bounds(df)
 
         # Shuffle rows
         df = df.sample(frac=1, random_state=self.plan.seed).reset_index(drop=True)
@@ -89,6 +108,29 @@ class DatasetGenerator:
             return self._generate_binary_feature(feature.p)
         else:
             raise ValueError(f"Unsupported feature type: {getattr(feature, 'type', type(feature))}")
+
+    def _generate_derived_feature(
+        self, feature: DerivedNumericalFeature, df: pd.DataFrame
+    ) -> np.ndarray:
+        """Generate a numeric feature from a declared dependency formula."""
+        referenced = self._referenced_features(feature.formula)
+        missing = sorted(set(referenced) - set(df.columns))
+        if missing:
+            raise ValueError(
+                f"Derived feature '{feature.name}' references features that have "
+                f"not been generated yet: {', '.join(missing)}"
+            )
+
+        return self._evaluate_formula(feature.formula, df)
+
+    @staticmethod
+    def _referenced_features(terms: List[TargetTerm]) -> List[str]:
+        """Return feature names referenced by structured formula terms."""
+        references = []
+        for term in terms:
+            if isinstance(term, (LinearTerm, CategoricalTerm)):
+                references.append(term.feature)
+        return references
 
     def _generate_numerical_feature(self, dist: NumericalDistribution) -> np.ndarray:
         """Generate numerical feature from structured distribution."""
@@ -124,14 +166,56 @@ class DatasetGenerator:
         return self.rng.binomial(1, p, self.rows)
 
     def _generate_classification_target(self, df: pd.DataFrame) -> np.ndarray:
-        """Generate classification target via thresholded structured formula."""
-        formula_output = self._evaluate_formula(self.plan.target_formula, df)
+        """Generate a classification target from a latent score.
 
-        # Simple thresholding: negative -> 0, positive -> 1
-        targets = (formula_output >= 0).astype(int)
+        Existing plans keep the historical threshold behavior. New plans can
+        request calibrated Bernoulli sampling from a logistic probability,
+        which preserves uncertainty near the decision boundary and avoids a
+        brittle hard threshold at zero.
+        """
+        formula_output = self._evaluate_formula(self.plan.target_formula, df)
+        config = self.plan.classification
+
+        if config and config.mode == "bernoulli_logistic":
+            temperature = max(float(config.temperature), 1e-9)
+            score = formula_output.astype(float)
+
+            if config.target_rate is not None:
+                score = score + self._calibration_shift(
+                    score, float(config.target_rate), temperature
+                )
+
+            probabilities = 1.0 / (1.0 + np.exp(-score / temperature))
+            probabilities = np.clip(
+                probabilities,
+                config.probability_clip_low,
+                config.probability_clip_high,
+            )
+            targets = self.rng.binomial(1, probabilities).astype(int)
+        else:
+            # Backward-compatible behavior for legacy plans.
+            targets = (formula_output >= 0).astype(int)
 
         logger.info(f"Generated {targets.sum()}/{len(targets)} positive class samples ({targets.mean():.2%})")
         return targets
+
+    @staticmethod
+    def _calibration_shift(
+        score: np.ndarray, target_rate: float, temperature: float
+    ) -> float:
+        """Find an intercept shift whose mean logistic probability hits a target rate."""
+        if not 0.0 < target_rate < 1.0:
+            raise ValueError("classification.target_rate must be between 0 and 1")
+
+        low, high = -50.0, 50.0
+        for _ in range(80):
+            midpoint = (low + high) / 2.0
+            probabilities = 1.0 / (1.0 + np.exp(-(score + midpoint) / temperature))
+            if probabilities.mean() < target_rate:
+                low = midpoint
+            else:
+                high = midpoint
+        return (low + high) / 2.0
 
     def _generate_regression_target(self, df: pd.DataFrame) -> np.ndarray:
         """Generate regression target using structured formula."""
@@ -179,6 +263,9 @@ class DatasetGenerator:
 
     def _get_noise_scale(self, targets: np.ndarray, noise_level: str) -> float:
         """Get noise scale relative to target standard deviation."""
+        if self.plan.target_noise_scale is not None:
+            return float(self.plan.target_noise_scale)
+
         target_std = np.std(targets)
 
         if noise_level == "low":
@@ -195,7 +282,7 @@ class DatasetGenerator:
         df_result = df.copy()
 
         for feature in self.plan.features:
-            if isinstance(feature, NumericalFeature) and feature.name in df_result.columns:
+            if isinstance(feature, (NumericalFeature, DerivedNumericalFeature)) and feature.name in df_result.columns:
                 rounding_precision = feature.rounding_precision
 
                 if rounding_precision:
@@ -246,6 +333,39 @@ class DatasetGenerator:
 
         return df_result
 
+    def _apply_target_rounding(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Round a target only when the plan explicitly requests it."""
+        precision = self.plan.target_rounding_precision
+        if not precision or self.plan.target_name not in df.columns:
+            return df
+
+        result = df.copy()
+        values = result[self.plan.target_name]
+        if precision in ["0.1", "0.01", "0.001"]:
+            decimals = len(precision.split(".")[1])
+            result[self.plan.target_name] = np.round(values, decimals)
+        elif precision in ["integer", "1"]:
+            result[self.plan.target_name] = np.round(values).astype("Int64")
+        else:
+            logger.warning("Unknown target rounding precision '%s'", precision)
+        return result
+
+    def _apply_bounds(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Clip declared numeric features to their domain bounds."""
+        result = df.copy()
+        for feature in self.plan.features:
+            if not isinstance(feature, (NumericalFeature, DerivedNumericalFeature)):
+                continue
+            if feature.name not in result.columns or feature.bounds is None:
+                continue
+
+            bounds: FeatureBounds = feature.bounds
+            if bounds.low is not None:
+                result[feature.name] = result[feature.name].clip(lower=bounds.low)
+            if bounds.high is not None:
+                result[feature.name] = result[feature.name].clip(upper=bounds.high)
+        return result
+
     def _apply_missingness(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply missing values to specified features."""
         df_result = df.copy()
@@ -258,7 +378,53 @@ class DatasetGenerator:
                 df_result.loc[mask, feature.name] = np.nan
                 logger.info(f"Applied {missing_rate:.1%} missing values to {feature.name}")
 
+        # Apply conditional rules after the baseline rates. The condition is
+        # evaluated on the fully generated data before this rule masks rows.
+        for rule in self.plan.missingness_rules:
+            if rule.feature not in df_result.columns:
+                raise ValueError(
+                    f"Missingness rule references unknown feature '{rule.feature}'"
+                )
+            if not 0.0 <= rule.rate <= 1.0:
+                raise ValueError("Missingness rule rates must be between 0 and 1")
+
+            condition = self._missingness_condition(df_result, rule)
+            mask = condition & (self.rng.random(len(df_result)) < rule.rate)
+            df_result.loc[mask, rule.feature] = np.nan
+            logger.info(
+                "Applied %.1f%% conditional missingness to %s",
+                rule.rate * 100,
+                rule.feature,
+            )
+
         return df_result
+
+    @staticmethod
+    def _missingness_condition(df: pd.DataFrame, rule: MissingnessRule) -> np.ndarray:
+        """Evaluate one optional row condition for a missingness rule."""
+        if rule.condition_feature is None:
+            return np.ones(len(df), dtype=bool)
+        if rule.condition_feature not in df.columns:
+            raise ValueError(
+                f"Missingness condition references unknown feature '{rule.condition_feature}'"
+            )
+
+        series = df[rule.condition_feature]
+        operator = rule.condition_operator or "eq"
+        value = rule.condition_value
+        if operator == "eq":
+            return (series == value).to_numpy()
+        if operator == "ne":
+            return (series != value).to_numpy()
+        if operator == "lt":
+            return (series < value).fillna(False).to_numpy()
+        if operator == "le":
+            return (series <= value).fillna(False).to_numpy()
+        if operator == "gt":
+            return (series > value).fillna(False).to_numpy()
+        if operator == "ge":
+            return (series >= value).fillna(False).to_numpy()
+        raise ValueError(f"Unsupported missingness operator '{operator}'")
 
     def _apply_outliers(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply outliers to numerical features."""
@@ -313,13 +479,16 @@ class DatasetGenerator:
                 "generation_time_seconds": round(generation_time, 2),
                 "seed": self.plan.seed,
                 "domain": self.plan.domain,
-                "task": self.plan.task
+                "task": self.plan.task,
+                "plan_version": self.plan.plan_version,
             },
             "target_stats": {},
             "feature_stats": {},
+            "relationship_stats": {},
             "data_quality": {
                 "missingness_rates": {},
-                "outlier_counts": {}
+                "outlier_counts": {},
+                "bound_violations": {},
             }
         }
 
@@ -344,7 +513,7 @@ class DatasetGenerator:
             if col == self.plan.target_name:
                 continue
 
-            if df[col].dtype in [np.float64, np.int64]:
+            if pd.api.types.is_numeric_dtype(df[col]):
                 report["feature_stats"][col] = {
                     "type": "numerical",
                     "mean": float(df[col].mean()) if not df[col].isna().all() else None,
@@ -366,6 +535,34 @@ class DatasetGenerator:
                 missing_rate = df[col].isna().mean()
                 if missing_rate > 0:
                     report["data_quality"]["missingness_rates"][col] = float(missing_rate)
+
+        for feature in self.plan.features:
+            if isinstance(feature, DerivedNumericalFeature):
+                for term in feature.formula:
+                    if not isinstance(term, LinearTerm):
+                        continue
+                    if term.feature not in df.columns or feature.name not in df.columns:
+                        continue
+                    pair = df[[term.feature, feature.name]].dropna()
+                    if len(pair) >= 2 and pd.api.types.is_numeric_dtype(pair[term.feature]):
+                        report["relationship_stats"][f"{term.feature}->{feature.name}"] = {
+                            "coefficient": term.coefficient,
+                            "correlation": float(pair[term.feature].corr(pair[feature.name])),
+                        }
+
+            if not isinstance(feature, (NumericalFeature, DerivedNumericalFeature)):
+                continue
+            if feature.bounds is None or feature.name not in df.columns:
+                continue
+
+            bounds = feature.bounds
+            values = df[feature.name]
+            violations = np.zeros(len(values), dtype=bool)
+            if bounds.low is not None:
+                violations |= (values < bounds.low).fillna(False).to_numpy()
+            if bounds.high is not None:
+                violations |= (values > bounds.high).fillna(False).to_numpy()
+            report["data_quality"]["bound_violations"][feature.name] = int(violations.sum())
 
         return report
 

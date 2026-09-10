@@ -23,7 +23,7 @@ cd datagen
 # Install dependencies with uv
 uv sync
 
-# Set OpenAI API key
+# Set an OpenAI API key only when you want the wizard to create a plan
 export OPENAI_API_KEY="your-api-key-here"
 ```
 
@@ -67,6 +67,35 @@ uv run python datagen.py \
 ```
 
 All outputs are saved to the `out/` directory by default.
+
+### Keyless, reproducible generation from a plan
+
+A reviewed plan can supply the feature relationships and controls directly.
+Plan mode skips the OpenAI plan generator, so it works without an API key. Use
+it for released course datasets.
+
+Run this command:
+
+```bash
+env -u OPENAI_API_KEY uv run python datagen.py \
+  --plan path/to/reviewed_plan.json \
+  --accept \
+  --outdir out/release
+```
+
+Plan version 2 adds the controls needed for answerable educational datasets:
+
+- `derived_numerical` features make dependencies between measurements explicit.
+- `bounds` prevent impossible values after noise and rounding.
+- `missingness_rules` model conditional, domain-specific missing data.
+- `classification.mode = "bernoulli_logistic"` creates probabilistic labels
+  instead of a brittle zero-threshold split.
+- target rounding and an explicit regression noise scale make the released
+  numbers stable and auditable.
+
+We edit the plan directly. Generation is deterministic for a fixed plan, seed,
+and generator version. The report records relationship statistics, missingness,
+and bound violations for review.
 
 ## Examples
 
