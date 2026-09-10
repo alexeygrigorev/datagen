@@ -8,7 +8,7 @@ import pandas as pd
 import questionary
 import typer
 
-from .schemas import WizardAnswers, get_random_row_count
+from .schemas import WizardAnswers, format_target_formula, get_random_row_count
 
 
 
@@ -196,7 +196,7 @@ def main(
                 typer.echo(f"     {feature_type_emoji} {feature.name}: {feature.domain_semantics}{missing_info}")
             
             typer.echo(f"   Target: {dataset_plan.target_name}")
-            typer.echo(f"   Target formula: {dataset_plan.target_formula}")
+            typer.echo(f"   Target formula: {format_target_formula(dataset_plan.target_formula)}")
             
             # Ask for dataset name confirmation
             if not accept:
