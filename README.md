@@ -159,12 +159,25 @@ Each generation creates:
 
 ## Feature Types & Distributions
 
-The LLM automatically selects appropriate distributions and rounding:
+The LLM emits a structured `DatasetPlan` (OpenAI structured output) — no string DSL or regex parsing. Features are a discriminated union on `type`:
 
-- **Numerical**: `normal(μ,σ)`, `uniform(a,b)`, `lognormal(μ,σ)`, `poisson(λ)` with smart rounding
-- **Categorical**: Custom categories with specified probabilities
-- **Binary**: `bernoulli(p)` for 0/1 features
+- **Numerical**: `{"type": "numerical", "distribution": {"kind": "normal", "mean": 0, "std": 1}}` — kinds: `normal`, `uniform {"low", "high"}`, `lognormal {"mean", "sigma"}`, `poisson {"lam"}`, with smart rounding
+- **Categorical**: `{"type": "categorical", "categories": ["a", "b"], "probabilities": [0.7, 0.3]}` (`probabilities: null` = uniform)
+- **Binary**: `{"type": "binary", "p": 0.3}` for 0/1 features
 - **Missing Values**: Per-feature missing_rate (0.0 to 0.3) for realistic data quality
+
+The target is a structured term list (`target_formula`), e.g.:
+
+```json
+[
+  {"kind": "constant", "value": -1.0},
+  {"kind": "linear", "feature": "age", "coefficient": 0.5},
+  {"kind": "categorical", "feature": "contract", "value": "monthly", "coefficient": 1.2},
+  {"kind": "noise", "distribution": {"kind": "normal", "mean": 0, "std": 0.5}, "coefficient": 1.0}
+]
+```
+
+Classification thresholds the evaluated sum at 0 (`>= 0` → class 1); regression adds noise scaled to the target std.
 
 ## CLI Options
 
